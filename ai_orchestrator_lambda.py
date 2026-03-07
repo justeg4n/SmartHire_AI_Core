@@ -2,20 +2,22 @@ import json
 import os
 import logging
 import boto3
+import base64  # REQUIRED: To convert MP3 audio into a string for the Backend
 from botocore.exceptions import ClientError
-# Prerequisite: pip install aws-xray-sdk
 from aws_xray_sdk.core import xray_recorder
 from aws_xray_sdk.core import patch_all
 
-# Patch all supported libraries for X-Ray tracing (measures latency for the <1.5s NFR)
+# Patch all supported libraries for X-Ray tracing
 patch_all()
 
-# 1. SET UP PROFESSIONAL LOGGING FOR CLOUDWATCH
+# 1. SET UP PROFESSIONAL LOGGING
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# 2. COLD START OPTIMIZATION: Initialize Clients in the Global Scope
+# 2. COLD START OPTIMIZATION: Initialize BOTH Clients in the Global Scope
 bedrock_client = boto3.client('bedrock-runtime')
+polly_client = boto3.client('polly') # ADDED: Polly Client
+
 MODEL_ID = os.environ.get('BEDROCK_MODEL_ID', 'anthropic.claude-3-5-sonnet-20240620-v1:0')
 MAX_TOKENS = int(os.environ.get('MAX_TOKENS', '150'))
 
@@ -23,16 +25,12 @@ def manage_token_budget(history: list) -> list:
     """Keep the last 10 conversation turns to prevent Context Window overflow."""
     return history[-10:] if len(history) > 10 else history
 
-@xray_recorder.capture('GenerateInterviewQuestion')
+@xray_recorder.capture('GenerateInterviewQuestionAndVoice')
 def lambda_handler(event, context):
-    """
-    Professional AWS Lambda Handler for the AI Orchestrator.
-    Expected event payload: { "jd_context": "...", "history": [...], "code_state": "..." }
-    """
     logger.info("Initializing AI Orchestrator Lambda Handler")
     
     try:
-        # Safely extract data using .get()
+        # --- PART 1: THE BRAIN (BEDROCK) ---
         jd_context = event.get('jd_context', '')
         history = event.get('history', [])
         code_state = event.get('code_state', 'No code written yet.')
@@ -62,27 +60,50 @@ def lambda_handler(event, context):
         }
 
         logger.info("Calling Amazon Bedrock Claude 3.5 Sonnet...")
-        response = bedrock_client.invoke_model(
+        bedrock_response = bedrock_client.invoke_model(
             modelId=MODEL_ID,
             contentType='application/json',
             accept='application/json',
             body=json.dumps(payload)
         )
         
-        result_body = json.loads(response.get('body').read())
+        result_body = json.loads(bedrock_response.get('body').read())
         ai_question = result_body['content'][0]['text']
-        
         logger.info("Question generated successfully.")
+
+        # --- PART 2: THE VOICE (POLLY) ---
+        logger.info("Calling Amazon Polly to synthesize speech...")
+        ssml_text = f"<speak><prosody rate='fast'>{ai_question}</prosody></speak>"
         
-        # Return standard API/WebSocket format
+        polly_response = polly_client.synthesize_speech(
+            Text=ssml_text,
+            OutputFormat='mp3',
+            TextType='ssml',
+            VoiceId='Matthew',
+            Engine='neural'
+        )
+        
+        # Read the audio bytes and convert to Base64 String
+        if "AudioStream" in polly_response:
+            audio_bytes = polly_response["AudioStream"].read()
+            audio_base64 = base64.b64encode(audio_bytes).decode('utf-8')
+            logger.info("Audio synthesized and encoded to Base64 successfully.")
+        else:
+            raise Exception("Polly did not return an AudioStream")
+
+        # --- PART 3: RETURN TO BACKEND ---
+        # The Backend will decode the audio_base64 string back into an MP3 file to play to the user
         return {
             'statusCode': 200,
-            'body': json.dumps({'ai_question': ai_question})
+            'body': json.dumps({
+                'ai_question_text': ai_question,
+                'ai_audio_base64': audio_base64 
+            })
         }
 
     except ClientError as e:
         error_msg = e.response['Error']['Message']
-        logger.error(f"Bedrock ClientError: {error_msg}")
+        logger.error(f"AWS ClientError: {error_msg}")
         return {'statusCode': 500, 'body': json.dumps({'error': 'AI Service Unavailable', 'details': error_msg})}
     except Exception as e:
         logger.error(f"Unknown System Error: {str(e)}")
