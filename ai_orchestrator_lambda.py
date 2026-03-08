@@ -83,17 +83,32 @@ If they speak English, reply in English.
         logger.info("Question generated successfully.")
 
         # PART 2: THE VOICE (POLLY)
-        logger.info("Calling Amazon Polly to synthesize speech...")
+        # 1. Lấy thông tin ngôn ngữ từ Frontend (Mặc định là tiếng Anh nếu không có)
+        interview_language = event.get('language', 'en-US') 
 
-        ssml_text = f"<speak><prosody rate='fast'>{ai_question}</prosody></speak>"
+        # 2. Cấu hình giọng đọc ĐỘNG
+        if interview_language == 'vi-VN':
+            voice_id = 'Thi'
+            lang_code = 'vi-VN'
+            engine = 'standard'
+        else:
+            voice_id = 'Matthew' 
+            lang_code = 'en-US'
+            engine = 'neural'
+
+        logger.info(f"Calling Amazon Polly with Voice: {voice_id} ({lang_code})...")
         
+        # Bọc văn bản bằng thẻ SSML
+        ssml_text = f"<speak><prosody rate='medium'>{ai_question}</prosody></speak>"
+        
+        # 3. Gọi Polly với các biến động
         polly_response = polly_client.synthesize_speech(
             Text=ssml_text,
             OutputFormat='mp3',
             TextType='ssml',
-            VoiceId='Thi',
-            LanguageCode='vi-VN',
-            Engine='standard'
+            VoiceId=voice_id,
+            LanguageCode=lang_code,
+            Engine=engine
         )
         
         # Read the audio bytes and convert to Base64 String

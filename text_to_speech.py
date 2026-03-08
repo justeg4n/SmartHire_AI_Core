@@ -8,7 +8,7 @@ def synthesize_ai_voice(ai_text_response, output_filename="ai_voice.mp3"):
     
     # Bọc text trong thẻ SSML để thêm khoảng nghỉ (pause) tự nhiên
     # Ví dụ: Thêm thẻ <break> sau dấu chấm câu.
-    ssml_text = f"<speak><prosody rate='fast'>{ai_text_response}</prosody></speak>"
+    ssml_text = f"<speak><prosody rate='medium'>{ai_text_response}</prosody></speak>"
     
     print("Calling Amazon Polly (Neural TTS)...")
     try:
