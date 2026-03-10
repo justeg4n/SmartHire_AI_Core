@@ -1,10 +1,21 @@
 import boto3
 import json
 import os
+import time
+from botocore.config import Config
 
-# Initialize Bedrock Client
-bedrock_client = boto3.client('bedrock-runtime')
-MODEL_ID = 'anthropic.claude-3-5-sonnet-20240620-v1:0'
+# Configuration for Adaptive Retry: Automatically adjusts wait times between retries
+retry_config = Config(
+    region_name='ap-southeast-1',
+    retries={
+        'max_attempts': 10,  # Increased from 4 to 10 attempts
+        'mode': 'adaptive'   # AWS's smartest mode: Auto-adjusts request speed
+    }
+)
+
+# Initialize the Bedrock client with the new configuration
+bedrock_client = boto3.client('bedrock-runtime', config=retry_config)
+MODEL_ID = 'apac.anthropic.claude-3-5-sonnet-20241022-v2:0'
 
 def manage_token_budget(history: list) -> list:
     """Keep only the last 10 messages (5 turns) to save tokens."""
@@ -43,17 +54,21 @@ def simulate_interview():
     conversation_history.append({"role": "assistant", "content": "Welcome to the SmartHire interview! Let's start by discussing your experience with AWS Serverless architectures. Could you tell me about a time you optimized a Lambda function?"})
 
     while True:
-        print("\n--------------------------------------------------")
+        print("\n" + "-" * 50)
         
-        # 1. Get Candidate Voice/Text Input
+        # 1. Get Candidate Voice/Text Input (Called ONLY ONCE)
         candidate_speech = input("You (Speak): ")
+
         if candidate_speech.lower() in ['exit', 'quit']:
             print("Ending simulation...")
             break
-            
-        # 2. Get Candidate Code Input (Simulating the Monaco Editor)
-        print("You (Code Editor - Press Enter to leave blank): ")
-        candidate_code = input("> ")
+
+        # 2. Get Candidate Code Input (Called ONLY ONCE)
+        candidate_code = input("You (Code Editor - Press Enter to leave blank):\n> ")
+
+        # Print thinking status ONLY ONCE and apply cooldown
+        print("\n[AI is thinking...]")
+        time.sleep(2) # Give Bedrock a 2-second breather to prevent Throttling
 
         # 3. Add user input to history
         conversation_history.append({"role": "user", "content": candidate_speech})
@@ -79,7 +94,6 @@ def simulate_interview():
         }
 
         # 6. Call AWS Bedrock
-        print("\n[AI is thinking...]")
         try:
             response = bedrock_client.invoke_model(
                 modelId=MODEL_ID,
