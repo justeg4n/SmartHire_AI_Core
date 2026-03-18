@@ -14,6 +14,3 @@ __pycache__/
 # Ignore environment variables (where keys should live)
 .env
 
-# Ignore all datasets and CV files
-data/
-*.csv
