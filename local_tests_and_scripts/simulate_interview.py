@@ -8,8 +8,8 @@ from botocore.config import Config
 retry_config = Config(
     region_name='ap-southeast-1',
     retries={
-        'max_attempts': 10,  # Increased from 4 to 10 attempts
-        'mode': 'adaptive'   # AWS's smartest mode: Auto-adjusts request speed
+        'max_attempts': 10,
+        'mode': 'adaptive'
     }
 )
 
@@ -27,7 +27,7 @@ def simulate_interview():
     print("==================================================")
     print("Type 'exit' or 'quit' to end the interview.\n")
 
-    # The exact system prompt from your production Lambda
+
     system_prompt = """You are an elite Senior Technical Recruiter and AI Interviewer for the SmartHire platform.
     Your objective is to conduct a professional, dynamic, and technically rigorous interview based on the provided Job Description.
 
