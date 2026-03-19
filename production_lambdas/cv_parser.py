@@ -1,12 +1,12 @@
 import boto3
 import json
-import urllib.request
 import os
 import time
 import math
+from decimal import Decimal
 from botocore.config import Config
 
-# 1. AWS CLIENT CONFIGURATION
+# AWS Client Configuration
 retry_config = Config(
     region_name='ap-southeast-1', 
     retries={'max_attempts': 10, 'mode': 'adaptive'}
@@ -14,14 +14,15 @@ retry_config = Config(
 
 bedrock = boto3.client('bedrock-runtime', config=retry_config)
 textract = boto3.client('textract', region_name='ap-southeast-1')
+dynamodb = boto3.resource('dynamodb', region_name='ap-southeast-1')
 
 CLAUDE_MODEL_ID = 'apac.anthropic.claude-3-5-sonnet-20241022-v2:0'
 COHERE_MODEL_ID = 'cohere.embed-english-v3'
+DYNAMODB_TABLE = os.environ.get('DYNAMODB_TABLE', 'SmartHire_Profiles')
 
-# 2. MATH FUNCTIONS: VECTOR & COSINE SIMILARITY
+# Math Functions: Vector & Cosine Similarity
 def get_cohere_embedding(text: str) -> list:
-    """Converts text into a 1024-dimensional vector array using Cohere."""
-    safe_text = text[:8000] # Cohere safe limit
+    safe_text = text[:8000]
     
     payload = {
         "texts": [safe_text],
@@ -40,7 +41,6 @@ def get_cohere_embedding(text: str) -> list:
     return response_body['embeddings'][0]
 
 def calculate_cosine_similarity(vec1: list, vec2: list) -> float:
-    """Calculates the angle between 2 vectors. Returns a float from 0.0 to 1.0"""
     dot_product = sum(a * b for a, b in zip(vec1, vec2))
     magnitude1 = math.sqrt(sum(a * a for a in vec1))
     magnitude2 = math.sqrt(sum(b * b for b in vec2))
@@ -50,11 +50,8 @@ def calculate_cosine_similarity(vec1: list, vec2: list) -> float:
         
     return dot_product / (magnitude1 * magnitude2)
 
-# 3. CORE AI: Parse CV with Claude
+# Core AI: Parse CV with Claude
 def parse_and_evaluate_cv(raw_cv_text, jd_text, math_match_score):
-    """
-    Claude receives the pre-calculated Math score to act as its baseline truth.
-    """
     system_prompt = f"""You are an elite Senior Technical Recruiter AI.
     
     CRITICAL INSTRUCTION: A deterministic Machine Learning engine has already compared the semantic vectors of this Candidate's CV against the Job Description. 
@@ -75,7 +72,7 @@ def parse_and_evaluate_cv(raw_cv_text, jd_text, math_match_score):
       "soft_skills": ["array of strings"],
       "years_experience": 0,
       "matching_score": {math_match_score},
-      "strengths": "Short paragraph explaining why they are a {math_match_score}% fit.",
+      "strengths": "Short paragraph explaining why they are a fit.",
       "gaps": "Short paragraph explaining what required skills they are missing."
     }}"""
 
@@ -98,7 +95,7 @@ def parse_and_evaluate_cv(raw_cv_text, jd_text, math_match_score):
     
     return json.loads(response.get('body').read())['content'][0]['text']
 
-# 4. TEXTRACT: Read PDF/Image from S3
+# Textract: Read PDF/Image from S3
 def extract_text_from_s3(bucket, key):
     response = textract.start_document_text_detection(
         DocumentLocation={'S3Object': {'Bucket': bucket, 'Name': key}}
@@ -125,38 +122,35 @@ def extract_text_from_s3(bucket, key):
         
     return " ".join(pages_text)
 
-# 5. BACKEND API CALLER
-def call_backend_api(profile_id, parsed_data, success=True):
-    backend_url = os.environ.get('BACKEND_URL', 'http://localhost:5161')
-    api_url = f"{backend_url}/api/cv/parsed-result"
+# Database Integration: Save directly to DynamoDB
+def save_to_dynamodb(profile_id, parsed_data, success=True):
+    table = dynamodb.Table(DYNAMODB_TABLE)
     
-    payload = {
-        "profileId": profile_id,
-        "success": success,
-        "seniorityEstimate": parsed_data.get("seniority_estimate", ""),
-        "frontendSkills": parsed_data.get("frontend_skills", []),
-        "backendSkills": parsed_data.get("backend_skills", []),
-        "devopsSkills": parsed_data.get("devops_skills", []),
-        "softSkills": parsed_data.get("soft_skills", []),
-        "yearsExperience": parsed_data.get("years_experience", 0),
-        "matchingScore": parsed_data.get("matching_score", 0),
-        "strengths": parsed_data.get("strengths", ""),
-        "gaps": parsed_data.get("gaps", "")
+    # DynamoDB requires floats to be cast to Decimal
+    parsed_data = json.loads(json.dumps(parsed_data), parse_float=Decimal)
+    
+    item = {
+        'ProfileId': str(profile_id),
+        'ProcessSuccess': success,
+        'ProcessedAt': int(time.time()),
+        'SeniorityEstimate': parsed_data.get("seniority_estimate", ""),
+        'FrontendSkills': parsed_data.get("frontend_skills", []),
+        'BackendSkills': parsed_data.get("backend_skills", []),
+        'DevOpsSkills': parsed_data.get("devops_skills", []),
+        'SoftSkills': parsed_data.get("soft_skills", []),
+        'YearsExperience': parsed_data.get("years_experience", Decimal('0')),
+        'MatchingScore': parsed_data.get("matching_score", Decimal('0')),
+        'Strengths': parsed_data.get("strengths", ""),
+        'Gaps': parsed_data.get("gaps", "")
     }
     
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        api_url, data=data,
-        headers={"Content-Type": "application/json", "ngrok-skip-browser-warning": "true"},
-        method="POST"
-    )
     try:
-        urllib.request.urlopen(req, timeout=10)
-        print(f"Backend API called successfully for profile {profile_id}")
+        table.put_item(Item=item)
+        print(f"SUCCESS: Saved profile {profile_id} directly to DynamoDB.")
     except Exception as e:
-        print(f"Backend API call failed: {str(e)}")
+        print(f"ERROR: Failed to save to DynamoDB. Details: {str(e)}")
 
-# 6. LAMBDA HANDLER
+# Lambda Handler Orchestration
 def lambda_handler(event, context):
     profile_id = None
     try:
@@ -165,30 +159,26 @@ def lambda_handler(event, context):
         file_key = sqs_body['fileKey']
         jd_text = sqs_body.get('jdText', 'Evaluate general technical skills.')
         
-        print(f"Starting CV processing | ProfileId: {profile_id}")
+        print(f"INFO: Starting CV processing for ProfileId: {profile_id}")
         
-        # Step 1: Extract Text
         raw_cv_text = extract_text_from_s3("hirelo-cv-storage", file_key)
         
-        # Step 2: Math Score (Vector Similarity)
-        print("Running ML Vector Embedding...")
+        print("INFO: Running ML Vector Embedding...")
         cv_vector = get_cohere_embedding(raw_cv_text)
         jd_vector = get_cohere_embedding(jd_text)
         
         raw_score = calculate_cosine_similarity(cv_vector, jd_vector)
         math_match_score = round(raw_score * 100, 2)
-        print(f"ML Match Score: {math_match_score}%")
+        print(f"INFO: ML Match Score: {math_match_score}%")
         
-        # Step 3: Claude Contextual Analysis
         parsed_json_string = parse_and_evaluate_cv(raw_cv_text, jd_text, math_match_score)
         parsed_data = json.loads(parsed_json_string)
         
-        # Step 4: Post to Backend
-        call_backend_api(profile_id, parsed_data, success=True)
+        save_to_dynamodb(profile_id, parsed_data, success=True)
         return {'statusCode': 200, 'body': 'Success'}
         
     except Exception as e:
-        print(f"System Error: {str(e)}")
+        print(f"ERROR: System Error: {str(e)}")
         if profile_id:
-            call_backend_api(profile_id, {}, success=False)
+            save_to_dynamodb(profile_id, {}, success=False)
         return {'statusCode': 500, 'body': json.dumps({'error': str(e)})}
