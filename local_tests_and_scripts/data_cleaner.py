@@ -3,9 +3,7 @@ import re
 import pandas as pd
 import docx
 
-# ==========================================
 # 1. THE ULTIMATE TEXT CLEANING ENGINE
-# ==========================================
 def clean_text(text):
     """Obliterates HTML, invisible spaces, Â symbols, and bad encoding."""
     if pd.isna(text) or not isinstance(text, str):
@@ -30,9 +28,7 @@ def clean_text(text):
     
     return text.strip()
 
-# ==========================================
 # 2. PROCESS CVs (.docx)
-# ==========================================
 def process_docx_cvs(folder_path):
     print(f"Scanning folder: {folder_path}...")
     cv_data = []
@@ -55,9 +51,7 @@ def process_docx_cvs(folder_path):
                 
     return cv_data
 
-# ==========================================
 # 3. PROCESS JDs (.csv)
-# ==========================================
 def process_jd_csv(csv_path):
     print(f"\nReading JD dataset: {csv_path}...")
     try:
@@ -82,9 +76,7 @@ def process_jd_csv(csv_path):
         print(f"[-] Failed to process CSV: {e}")
         return None
 
-# ==========================================
 # 4. EXECUTE THE PIPELINE
-# ==========================================
 if __name__ == "__main__":
     # Ensure these paths are correct for your machine
     CV_FOLDER = r"D:\FPTU\AWS\AI_SmartHire\data\cv\archive\Resumes" 
