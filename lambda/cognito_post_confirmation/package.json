@@ -1,0 +1,10 @@
+{
+  "name": "cognito-post-confirmation",
+  "version": "1.0.0",
+  "description": "Sync Cognito user to RDS on PostConfirmation trigger",
+  "main": "index.js",
+  "dependencies": {
+    "pg": "^8.13.1",
+    "@aws-sdk/client-secrets-manager": "^3.750.0"
+  }
+}

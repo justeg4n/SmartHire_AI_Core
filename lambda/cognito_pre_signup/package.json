@@ -1,0 +1,9 @@
+{
+  "name": "cognito-pre-signup",
+  "version": "1.0.0",
+  "description": "Link external provider users to canonical Cognito native users on PreSignUp",
+  "main": "index.js",
+  "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.750.0"
+  }
+}
