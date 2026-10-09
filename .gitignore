@@ -1,15 +1,29 @@
-# Ignore virtual environments
+# Virtual environments / caches
 venv/
 env/
-
-# Ignore Python cache
+.venv/
 __pycache__/
 *.pyc
+node_modules/
 
-# Ignore local images and sample CVs
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Secrets — keys live in environment variables / AWS Secrets Manager
+.env
+*credentials*
+*.pem
+*.key
+
+# Datasets (CVs and job descriptions are not redistributed)
+data/
+*.zip
+*.csv
+
+# Local media (diagrams in diagram/ are kept)
 *.jpg
 *.png
-
-# Ignore environment variables (where keys should live)
-.env
-
+*.mp3
+!diagram/*.png
